@@ -11,7 +11,7 @@ By default the slices' z resolution defines all 3 voxel dimensions (i.e. 70x70x7
 Please be aware that this program can become very memory expensive with large data.
 
 
-##Future plans/TODO:
+## Future plans/TODO:
 * add a transformation parameter for the number of slices skipped from the last slice and thus allow a model which had i.e. only every 4th slice imaged.
 
 * add a parameter for easily setting any custom slice thicknesses other than 70um.
