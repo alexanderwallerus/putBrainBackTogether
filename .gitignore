@@ -1,0 +1,7 @@
+#exclude everything in this folder
+slices/*
+
+#want to keep the empty folder but
+#can't keep an empty folder - it needs to have at least one file =>
+#exception to the above rule:
+!slices/.gitkeep 
