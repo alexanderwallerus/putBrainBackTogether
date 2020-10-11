@@ -27,9 +27,10 @@ float umPerPixel = 0.908;
 boolean provideMaxImgDim = false;  //false = this will overwrite origImgMaxImgDim 
 float origImgMaxImgDim = 13014.0;  //using .png file metadata
 
-int subDiv = 1;  //each voxel will be split into sq(subDiv) new voxels: (1, 4, 9...)
+int subDiv;      //each voxel will be split into sq(subDiv) new voxels: (1, 4, 9...)
                  //1 = 70x70x70um voxels (default), 2 = 35umx35umx70um... 
 boolean showRoi;
+boolean showOverlay;
 boolean show2D;           //this boolean is turned false for 3D projection view
 float rotIncrement = 0.01;
 
@@ -49,7 +50,9 @@ void setup(){
   perspective(PI/3.0, width/height, cameraZ/10.0, cameraZ*10.0 *20);
     
   show2D = true;
+  showOverlay = true;
   showRoi = false;
+  subDiv = 1;
   
   String path = sketchPath();
   fileNames = listFileNames(path + "/slices");
@@ -125,25 +128,34 @@ void draw(){
                trans[currentSlice].roi[1].x, trans[currentSlice].roi[1].y);
         popStyle();
       }
-      fill(255);
-      textAlign(LEFT);
-      text("slice: " + trans[currentSlice].sliceName, 10, 20);
-      text("x: " + trans[currentSlice].xy.x, 10, 40);
-      text("y: " + trans[currentSlice].xy.y, 10, 60);
-      text("rotation: " + trans[currentSlice].rotation, 10, 80);
-      text("mirrored: " + trans[currentSlice].mirrored, 10, 100);
-      textAlign(RIGHT);
-      text("Controls:", 980, 20);
-      text("Move slice: DRAG LEFT MOUSE", 980, 40);
-      text("Rotate slice: SHIFT + WHEEL", 980, 60);
-      text("Flip slice: F", 980, 80);
-      text("Change slice: WHEEL", 980, 100);
-      text("Create region of interest: DRAG RIGHT MOUSE", 980, 120);
-      text("Show region of interest (in 2D and 3D): R", 980, 140);
-      text("Load previously saved transformations: L", 980, 160);
-      text("Save current transformations: S", 980, 180);
-      text("Create 3D voxel data\n(do this before swapping to 3D view): C", 980, 200);
-      text("View swap to 3D: V", 980, 240);
+      if(showOverlay){
+        fill(255);
+        textAlign(LEFT);
+        text("slice: " + trans[currentSlice].sliceName, 10, 20);
+        text("x: " + trans[currentSlice].xy.x, 10, 40);
+        text("y: " + trans[currentSlice].xy.y, 10, 60);
+        text("rotation: " + trans[currentSlice].rotation, 10, 80);
+        text("mirrored: " + trans[currentSlice].mirrored, 10, 100);
+        text("slices skipped from last: " + trans[currentSlice].slicesSkippedFromLast,
+             10, 120);
+        text("voxel subdivision modifier: " + subDiv, 10, 140);
+        textAlign(RIGHT);
+        text("Controls:", 980, 20);
+        text("Move slice: DRAG LEFT MOUSE", 980, 40);
+        text("Rotate slice: SHIFT + WHEEL", 980, 60);
+        text("Flip slice: F", 980, 80);
+        text("Change slice: WHEEL", 980, 100);
+        text("Create region of interest: DRAG RIGHT MOUSE", 980, 120);
+        text("Show region of interest (in 2D and 3D): R", 980, 140);
+        text("Load previously saved transformations: L", 980, 160);
+        text("Save current transformations: S", 980, 180);
+        text("Create 3D voxel data\n(do this before swapping to 3D view): C", 980, 
+             200);
+        text("View swap to 3D: V", 980, 240);
+        text("Change slices skipped from last: [ ]", 980, 260);
+        text("Toggle Overlay on/off: O", 980, 280);
+        text("SubDivide voxels: D", 980, 300);
+      }
     cam.endHUD();
   } else {
     background(0);
@@ -175,6 +187,8 @@ void createVolume(){
   }
   voxCols = new color[newImgWidth][newImgWidth][slices.length];
   
+  int skippedSlicesOffset = 0;  
+  //amount of z offset from skipped slices existing by this slice
   for(int i=0; i<slices.length; i++){
     //redraw the image with the same transformation as shown in 2D in a PGraphics
     PGraphics current = createGraphics(1000, 1000);
@@ -218,6 +232,7 @@ void createVolume(){
     }
     cur.updatePixels();
     
+    skippedSlicesOffset += trans[i].slicesSkippedFromLast;
     for(int y = 0; y<cur.height; y++){
       for(int x = 0; x<cur.width; x++){
         noStroke();
@@ -225,7 +240,8 @@ void createVolume(){
         vox.setFill(voxCols[x][y][i]);
         //default subDiv==1, no subdivisions
         vox.translate(x*10 - voxCols.length/2*10, y*10 - voxCols[0].length/2*10,
-                      -zDir*i*10 *subDiv + zDir*voxCols[0][0].length/2*10 *subDiv);
+                      -zDir*(i+skippedSlicesOffset)*10 *subDiv + 
+                      zDir*voxCols[0][0].length/2*10 *subDiv);
         voxels.addChild(vox);
       }
     }
@@ -263,6 +279,23 @@ void keyPressed(){
     }
     if(key == 'r'){
       showRoi = !showRoi;
+    }
+    if(key == '['){
+      trans[currentSlice].slicesSkippedFromLast--;
+      trans[currentSlice].slicesSkippedFromLast = 
+                          max(trans[currentSlice].slicesSkippedFromLast, 0);
+    }
+    if(key == ']'){
+      trans[currentSlice].slicesSkippedFromLast++;
+    }
+    if(key == 'o'){
+      showOverlay = !showOverlay;
+    }
+    if(key == 'd'){
+      subDiv += 1;
+      if(subDiv == 6){
+        subDiv = 1;
+      }
     }
   } else {
    //if(key == 'v'){
@@ -373,6 +406,7 @@ class Transformation{
   float rotation;
   boolean mirrored;
   PVector[] roi;
+  int slicesSkippedFromLast;
   
   Transformation(){
     sliceName = "";
@@ -380,6 +414,7 @@ class Transformation{
     xy = new PVector(0, 0);
     mirrored = false;
     roi = new PVector[]{new PVector(0, 0), new PVector(0, 0)};
+    slicesSkippedFromLast = 0;
   }
 }
 
@@ -411,13 +446,14 @@ void loadTransformations(){
     trans[i].roi[0].y = table.getInt(i, 6);
     trans[i].roi[1].x = table.getInt(i, 7);
     trans[i].roi[1].y = table.getInt(i, 8);
+    trans[i].slicesSkippedFromLast = table.getInt(i, 9);
     println("loaded slice " + i + " transformations"); 
   }
 }
 
 void saveTransformations(){
   Table table = new Table();
-  for(int i=0; i<9; i++){
+  for(int i=0; i<10; i++){
     table.addColumn();
   }
   for(int i=0; i<trans.length; i++){
@@ -431,6 +467,7 @@ void saveTransformations(){
     table.setInt(i, 6, int(trans[i].roi[0].y));
     table.setInt(i, 7, int(trans[i].roi[1].x));
     table.setInt(i, 8, int(trans[i].roi[1].y));
+    table.setInt(i, 9, trans[i].slicesSkippedFromLast);
   }
   saveTable(table, "data/transformations.csv");
 }
