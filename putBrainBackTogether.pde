@@ -35,8 +35,11 @@ boolean show2D;           //this boolean is turned false for 3D projection view
 float rotIncrement = 0.01;
 
 color[][][] voxCols;
-PShape voxels;
+PShape voxels[];
 int zDir = +1;            //set to +1 or -1 to build slices + or - into the z axis
+
+boolean pointCloud = true;    
+//a pointcloud is more efficient than voxels allowing higher detail visualization
 
 void setup(){
   size(1000, 1000, P3D);
@@ -44,6 +47,9 @@ void setup(){
   hint(DISABLE_DEPTH_SORT);
   hint(DISABLE_DEPTH_TEST);
   hint(DISABLE_DEPTH_MASK);
+  if(pointCloud){
+    hint(ENABLE_STROKE_PERSPECTIVE);
+  }
   
   //increase the zFar clipping plane from default to 20x
   float cameraZ = (height/2.0) / tan(PI*60.0/360.0);
@@ -99,7 +105,12 @@ void setup(){
   }
   currentSlice = 0;
   
-  voxels = createShape(GROUP);
+  voxels = new PShape[slices.length];
+  //trying to put all subdivided points into a single shape can cause
+  //java.lang.ArrayIndexOutOfBoundsException: 67108864
+  for(int i=0; i<voxels.length; i++){
+    voxels[i] = createShape(GROUP);
+  }
   
   //add a single test voxel with this code block for debugging:
   //  noStroke();
@@ -115,10 +126,12 @@ void draw(){
       background(0);
       pushMatrix();
         imageMode(CENTER);
-        translate(slices[currentSlice].width/2, slices[currentSlice].height/2);
-        translate(trans[currentSlice].xy.x, trans[currentSlice].xy.y);
-        rotate(trans[currentSlice].rotation);
-        image(slices[currentSlice], 0, 0);
+        if(slices[currentSlice] != null){
+          translate(slices[currentSlice].width/2, slices[currentSlice].height/2);
+          translate(trans[currentSlice].xy.x, trans[currentSlice].xy.y);
+          rotate(trans[currentSlice].rotation);
+          image(slices[currentSlice], 0, 0);
+        }
       popMatrix();
       if(showRoi){
         pushStyle();
@@ -160,7 +173,14 @@ void draw(){
   } else {
     background(0);
     blendMode(LIGHTEST);
-    shape(voxels);
+    try{
+      for(PShape s : voxels){
+        shape(s);
+      }
+    } catch(Exception e){
+      println(e);
+      exit();
+    }
   }
 }
 
@@ -194,7 +214,7 @@ void createVolume(){
     PGraphics current = createGraphics(1000, 1000);
     current.beginDraw();    current.endDraw();
     current.beginDraw();
-      current.push();
+      current.push(); 
         current.imageMode(CENTER);
         current.translate(slices[i].width/2, slices[i].height/2);
         current.translate(trans[i].xy.x, trans[i].xy.y);
@@ -216,12 +236,6 @@ void createVolume(){
     PImage cur = current.copy();
     cur.resize(newImgWidth, newImgWidth);
     
-    //free some memory by overwriting the large slices images that won't be needed
-    //for 3D visualization anymore, since all data is stored in cur and voxCols
-    slices[i] = createImage(10, 10, RGB);
-    System.gc();  //force the system to garbage collect now
-    println("Free memory: " + Runtime.getRuntime().freeMemory());
-    
     //fill the voxCols array
     cur.loadPixels();    
     for(int y = 0; y<cur.height; y++){
@@ -232,21 +246,52 @@ void createVolume(){
     }
     cur.updatePixels();
     
+    //free some memory by overwriting the large slices images that won't be needed
+    //for 3D visualization anymore, since all data is stored in voxCols.
+    //finalyze() may be a better way to do this...
+    slices[i] = null;
+    current = null;
+    cur = null;
+    System.gc();  //force the system to garbage collect now
+    println("Free memory: " + Runtime.getRuntime().freeMemory());
+    
     skippedSlicesOffset += trans[i].slicesSkippedFromLast;
-    for(int y = 0; y<cur.height; y++){
-      for(int x = 0; x<cur.width; x++){
-        noStroke();
-        PShape vox = createShape(BOX, 10, 10, 10*subDiv);
-        vox.setFill(voxCols[x][y][i]);
-        //default subDiv==1, no subdivisions
-        vox.translate(x*10 - voxCols.length/2*10, y*10 - voxCols[0].length/2*10,
-                      -zDir*(i+skippedSlicesOffset)*10 *subDiv + 
-                      zDir*voxCols[0][0].length/2*10 *subDiv);
-        voxels.addChild(vox);
+    if(!pointCloud){
+      for(int y = 0; y<voxCols[0].length; y++){    //image height
+        for(int x = 0; x<voxCols.length; x++){     //image width
+          noStroke();
+          PShape vox = createShape(BOX, 10, 10, 10*subDiv);
+          vox.setFill(voxCols[x][y][i]);
+          //default subDiv==1, no subdivisions
+          vox.translate((x - voxCols.length/2)*10, (y - voxCols[0].length/2)*10,
+                        (-zDir*(i+skippedSlicesOffset) *subDiv + 
+                         zDir*voxCols[0][0].length/2 *subDiv)*10);
+          voxels[i].addChild(vox);
+        }
       }
+      println("created slice " + i + " voxel data");
+    } else {
+      PShape points = createShape();
+      points.beginShape(POINTS);
+      for(int y = 0; y<voxCols[0].length; y++){ //image height
+        for(int x = 0; x<voxCols.length; x++){  //image width
+          for(int j=0; j<subDiv; j++){    //if subDiv > 1 copy points offset in depth
+            points.strokeWeight(12);      //a bit over the ideal 10, to better fill 
+            points.noFill();              //out the space with points
+            points.stroke(voxCols[x][y][i]);
+            points.vertex((x - voxCols.length/2)*10, (y - voxCols[0].length/2)*10,
+                          (-zDir*(i+skippedSlicesOffset) *subDiv + 
+                            zDir*voxCols[0][0].length/2 *subDiv)*10
+                            + 10*j);
+          }
+        }
+      }
+      println("created slice " + i + " voxel data");
+      points.endShape();
+      voxels[i].addChild(points);
     }
-    println("created slice " + i + " voxel data");
   }
+  voxCols = null;
   System.gc();
   println("Free memory: " + Runtime.getRuntime().freeMemory());
 }
@@ -423,31 +468,36 @@ void loadTransformations(){
   //keep a reference to the old transformation array for if something was mirrored
   Transformation[] oldTrans = new Transformation[trans.length];
   arrayCopy(trans, oldTrans);
-  trans = new Transformation[table.getRowCount()];
+  trans = new Transformation[trans.length];
   for(int i=0; i<trans.length; i++){
     trans[i] = new Transformation();
   }
   for(int i=0; i<table.getRowCount(); i++){
-    trans[i].sliceName = table.getString(i, 0);
-    trans[i].xy.x = table.getFloat(i, 1);
-    trans[i].xy.y = table.getFloat(i, 2);
-    trans[i].rotation = table.getFloat(i, 3);
-    if(table.getInt(i, 4) == 1 && !oldTrans[i].mirrored){
-      //this slice should be mirrored, but isn't yet
-      flipSlice(i);
-      trans[i].mirrored = true;
-    } else if (table.getInt(i, 4) == 0 && oldTrans[i].mirrored){
-      //this slice should not be mirrored, but is
-      flipSlice(i);
-      trans[i].mirrored = false;
+    try{
+      trans[i].sliceName = table.getString(i, 0);
+      trans[i].xy.x = table.getFloat(i, 1);
+      trans[i].xy.y = table.getFloat(i, 2);
+      trans[i].rotation = table.getFloat(i, 3);
+      if(table.getInt(i, 4) == 1 && !oldTrans[i].mirrored){
+        //this slice should be mirrored, but isn't yet
+        flipSlice(i);
+        trans[i].mirrored = true;
+      } else if (table.getInt(i, 4) == 0 && oldTrans[i].mirrored){
+        //this slice should not be mirrored, but is
+        flipSlice(i);
+        trans[i].mirrored = false;
+      }
+      trans[i].mirrored = table.getInt(i, 4) == 1;
+      trans[i].roi[0].x = table.getInt(i, 5);
+      trans[i].roi[0].y = table.getInt(i, 6);
+      trans[i].roi[1].x = table.getInt(i, 7);
+      trans[i].roi[1].y = table.getInt(i, 8);
+      trans[i].slicesSkippedFromLast = table.getInt(i, 9);
+      println("loaded slice " + i + " transformations"); 
+    } catch(ArrayIndexOutOfBoundsException e){
+      println("there are more slices in the .csv file than were loaded by the " +
+      "program\nskipping transformations for slice " + i);
     }
-    trans[i].mirrored = table.getInt(i, 4) == 1;
-    trans[i].roi[0].x = table.getInt(i, 5);
-    trans[i].roi[0].y = table.getInt(i, 6);
-    trans[i].roi[1].x = table.getInt(i, 7);
-    trans[i].roi[1].y = table.getInt(i, 8);
-    trans[i].slicesSkippedFromLast = table.getInt(i, 9);
-    println("loaded slice " + i + " transformations"); 
   }
 }
 

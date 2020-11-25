@@ -8,12 +8,13 @@ In the program you can simply drag and drop and rotate and invert the 2D slices 
 
 By default the slices' z resolution defines all 3 voxel dimensions (i.e. 70x70x70um voxels), however by increasing the subDiv parameter you can subdivide each voxel in x and y for achieving a higher x y resolution (i.e. 35x35x70um or an even higher resolution)
 
-Please be aware that this program can become very memory expensive with large data.
+Voxels are by default replaced with a more memory efficient point cloud to allow for higher detail visualization. Alternatively voxels can still be used by setting pointCloud = false;
+
+Please be aware that this program can become very memory expensive with a high subdivision modifiers on large data.
 
 
 ## Future plans/TODO:
-* add a transformation parameter for the number of slices skipped from the last slice and thus allow a model which had i.e. only every 4th slice imaged.
-
 * add a parameter for easily setting any custom slice thicknesses other than 70um.
 
-* learn how to use shaders and rework this code to run more efficiently, maybe as a point cloud... As it is it needs a large amount of RAM
+* add a function to create an increased detail image from the current 3D perspective.
+For this purpose render each slice 3D data individually at a higher subdivision modifier into an image from the same perspective, then combine all images into a new maximum projection.
