@@ -41,6 +41,11 @@ int zDir = +1;            //set to +1 or -1 to build slices + or - into the z ax
 boolean pointCloud = true;    
 //a pointcloud is more efficient than voxels allowing higher detail visualization
 
+BrainTrans brainTrans;   //transformation for the brain outline model
+PShape mouseBrain;
+PShader edges;
+boolean showOutline = true;
+
 void setup(){
   size(1000, 1000, P3D);
   cam = new PeasyCam(this, 400);
@@ -117,6 +122,14 @@ void setup(){
   //  PShape vox = createShape(BOX, 10, 10, 10);
   //  vox.setFill(color(int(random(256)), int(random(256)), int(random(256))));
   //voxels.addChild(vox);
+  
+  //wholebrain_mesh from https://scalablebrainatlas.incf.org/mouse/ABA_v3
+  //I slightly modified the model by manually cleaning up internal structures and
+  //smoothing out the edges they formed to allow for a clean outline projection.
+  mouseBrain = loadShape("allenBrainHollowSmoothed.obj");
+  //shader from the official processing examples: Topics => Shaders => EdgeFilter
+  edges = loadShader("edges.glsl");
+  brainTrans = new BrainTrans();
 }
 
 void draw(){
@@ -168,11 +181,33 @@ void draw(){
         text("Change slices skipped from last: [ ]", 980, 260);
         text("Toggle Overlay on/off: O", 980, 280);
         text("SubDivide voxels: D", 980, 300);
+        text("Toggle Brain Outline (in 3D): O", 980, 320);
+        text("Align Outline (in 3D): RDFGZXCVBN[]", 980, 340);
+        text("Save/Load Outline alignment (in 3D): S/L", 980, 360);
       }
     cam.endHUD();
   } else {
     background(0);
     blendMode(LIGHTEST);
+    if(showOutline){
+      lights();   //without light the surface of the 3d object won't be visible
+                  //it would function as only an outline filter.
+      pushMatrix();
+        translate(brainTrans.xyz.x * subDiv, brainTrans.xyz.y * subDiv, 
+                  brainTrans.xyz.z * subDiv);
+        rotateX(brainTrans.xyzRot.x);
+        rotateY(brainTrans.xyzRot.y);
+        rotateZ(brainTrans.xyzRot.z);
+        scale(brainTrans.scale * subDiv);
+        
+        shape(mouseBrain);
+      popMatrix();
+      filter(edges);   //everything drawn so far will be rendered with the filter
+      if(keyPressed){
+        moveBrain();
+      }
+      noLights();      //afterwards show voxels/point cloud with pure colors
+    }
     try{
       for(PShape s : voxels){
         shape(s);
@@ -297,15 +332,15 @@ void createVolume(){
 }
 
 void keyPressed(){
+  if(key == 'l'){
+    println("Loading transformations");
+    loadTransformations();
+  }
+  if(key == 's'){
+    println("Saving transformations");
+    saveTransformations();
+  }
   if(show2D){
-    if(key == 'l'){
-      println("Loading transformations");
-      loadTransformations();
-    }
-    if(key == 's'){
-      println("Saving transformations");
-      saveTransformations();
-    }
     if(key == 'f'){
       println("Flipping the image on the y axis");
       flipSlice(currentSlice);
@@ -343,6 +378,9 @@ void keyPressed(){
       }
     }
   } else {
+    if(key == 'o'){
+      showOutline = !showOutline;
+    }
    //if(key == 'v'){
    //   println("View swap to 2D");
    //   show2D = true;
@@ -472,33 +510,41 @@ void loadTransformations(){
   for(int i=0; i<trans.length; i++){
     trans[i] = new Transformation();
   }
-  for(int i=0; i<table.getRowCount(); i++){
+  for(int line=1; line<table.getRowCount(); line++){
+    int i = line-1;
     try{
-      trans[i].sliceName = table.getString(i, 0);
-      trans[i].xy.x = table.getFloat(i, 1);
-      trans[i].xy.y = table.getFloat(i, 2);
-      trans[i].rotation = table.getFloat(i, 3);
-      if(table.getInt(i, 4) == 1 && !oldTrans[i].mirrored){
+      trans[i].sliceName = table.getString(line, 0);
+      trans[i].xy.x = table.getFloat(line, 1);
+      trans[i].xy.y = table.getFloat(line, 2);
+      trans[i].rotation = table.getFloat(line, 3);
+      if(table.getInt(line, 4) == 1 && !oldTrans[i].mirrored){
         //this slice should be mirrored, but isn't yet
         flipSlice(i);
         trans[i].mirrored = true;
-      } else if (table.getInt(i, 4) == 0 && oldTrans[i].mirrored){
+      } else if (table.getInt(line, 4) == 0 && oldTrans[i].mirrored){
         //this slice should not be mirrored, but is
         flipSlice(i);
         trans[i].mirrored = false;
       }
-      trans[i].mirrored = table.getInt(i, 4) == 1;
-      trans[i].roi[0].x = table.getInt(i, 5);
-      trans[i].roi[0].y = table.getInt(i, 6);
-      trans[i].roi[1].x = table.getInt(i, 7);
-      trans[i].roi[1].y = table.getInt(i, 8);
-      trans[i].slicesSkippedFromLast = table.getInt(i, 9);
+      trans[i].mirrored = table.getInt(line, 4) == 1;
+      trans[i].roi[0].x = table.getInt(line, 5);
+      trans[i].roi[0].y = table.getInt(line, 6);
+      trans[i].roi[1].x = table.getInt(line, 7);
+      trans[i].roi[1].y = table.getInt(line, 8);
+      trans[i].slicesSkippedFromLast = table.getInt(line, 9);
       println("loaded slice " + i + " transformations"); 
     } catch(ArrayIndexOutOfBoundsException e){
       println("there are more slices in the .csv file than were loaded by the " +
       "program\nskipping transformations for slice " + i);
     }
   }
+  brainTrans.xyz.x = table.getFloat(0, 0);
+  brainTrans.xyz.y = table.getFloat(0, 1);
+  brainTrans.xyz.z = table.getFloat(0, 2);
+  brainTrans.xyzRot.x = table.getFloat(0, 3);
+  brainTrans.xyzRot.y = table.getFloat(0, 4);
+  brainTrans.xyzRot.z = table.getFloat(0, 5);
+  brainTrans.scale = table.getFloat(0, 6);
 }
 
 void saveTransformations(){
@@ -506,18 +552,58 @@ void saveTransformations(){
   for(int i=0; i<10; i++){
     table.addColumn();
   }
+  table.addRow();
+  table.setFloat(0, 0, brainTrans.xyz.x);
+  table.setFloat(0, 1, brainTrans.xyz.y);
+  table.setFloat(0, 2, brainTrans.xyz.z);
+  table.setFloat(0, 3, brainTrans.xyzRot.x);
+  table.setFloat(0, 4, brainTrans.xyzRot.y);
+  table.setFloat(0, 5, brainTrans.xyzRot.z);
+  table.setFloat(0, 6, brainTrans.scale);
   for(int i=0; i<trans.length; i++){
+    int line = i+1;
     table.addRow();
-    table.setString(i, 0, trans[i].sliceName);
-    table.setFloat(i, 1, trans[i].xy.x);
-    table.setFloat(i, 2, trans[i].xy.y);
-    table.setFloat(i, 3, trans[i].rotation);
-    table.setInt(i, 4, trans[i].mirrored ? 1 : 0);
-    table.setInt(i, 5, int(trans[i].roi[0].x));
-    table.setInt(i, 6, int(trans[i].roi[0].y));
-    table.setInt(i, 7, int(trans[i].roi[1].x));
-    table.setInt(i, 8, int(trans[i].roi[1].y));
-    table.setInt(i, 9, trans[i].slicesSkippedFromLast);
+    table.setString(line, 0, trans[i].sliceName);
+    table.setFloat(line, 1, trans[i].xy.x);
+    table.setFloat(line, 2, trans[i].xy.y);
+    table.setFloat(line, 3, trans[i].rotation);
+    table.setInt(line, 4, trans[i].mirrored ? 1 : 0);
+    table.setInt(line, 5, int(trans[i].roi[0].x));
+    table.setInt(line, 6, int(trans[i].roi[0].y));
+    table.setInt(line, 7, int(trans[i].roi[1].x));
+    table.setInt(line, 8, int(trans[i].roi[1].y));
+    table.setInt(line, 9, trans[i].slicesSkippedFromLast);
   }
   saveTable(table, "data/transformations.csv");
+}
+
+class BrainTrans{
+  PVector xyz, xyzRot;
+  float scale;
+  
+  BrainTrans(){
+    xyz =  new PVector();
+    xyzRot = new PVector();
+    scale = 1.0;
+  }
+}
+
+void moveBrain(){
+  //may want to use booleans to allow multiple keys at the same time if necessary
+  if(key == 'd'){brainTrans.xyz.x -= 0.5;}
+  if(key == 'g'){brainTrans.xyz.x += 0.5;}
+  if(key == 'e'){brainTrans.xyz.y -= 0.5;}
+  if(key == 't'){brainTrans.xyz.y += 0.5;}
+  if(key == 'r'){brainTrans.xyz.z += 0.5;}
+  if(key == 'f'){brainTrans.xyz.z -= 0.5;}
+  
+  if(key == 'z'){brainTrans.xyzRot.x -= 0.002;}
+  if(key == 'x'){brainTrans.xyzRot.x += 0.002;}
+  if(key == 'c'){brainTrans.xyzRot.y -= 0.002;}
+  if(key == 'v'){brainTrans.xyzRot.y += 0.002;}
+  if(key == 'b'){brainTrans.xyzRot.z -= 0.002;}
+  if(key == 'n'){brainTrans.xyzRot.z += 0.002;}
+  
+  if(key == ']'){brainTrans.scale *= 1.001;}
+  if(key == '['){brainTrans.scale *= 0.999;}
 }

@@ -12,6 +12,9 @@ Voxels are by default replaced with a more memory efficient point cloud to allow
 
 Please be aware that this program can become very memory expensive with a high subdivision modifiers on large data.
 
+The used 3D brain model is a modified version of the wholebrain_mesh from the the Allen Reference Atlas at https://scalablebrainatlas.incf.org/mouse/ABA_v3.
+> Lein ES, Hawrylycz MJ, Ao N, et al. (2007) "Genome-wide atlas of gene expression in the adult mouse brain." Nature 445(7124):168-76. [doi 10.1038/nature05453]
+I manually cleaned up the model's internal structures and smoothed out the edges they formed to allow for a clean outline projection.
 
 ## Future plans/TODO:
 * add a parameter for easily setting any custom slice thicknesses other than 70um.
