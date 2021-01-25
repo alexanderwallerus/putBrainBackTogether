@@ -126,7 +126,7 @@ void setup(){
   //wholebrain_mesh from https://scalablebrainatlas.incf.org/mouse/ABA_v3
   //I slightly modified the model by manually cleaning up internal structures and
   //smoothing out the edges they formed to allow for a clean outline projection.
-  mouseBrain = loadShape("allenBrainHollowSmoothed.obj");
+  mouseBrain = loadShape("allenBrainCleaned.obj");
   //shader from the official processing examples: Topics => Shaders => EdgeFilter
   edges = loadShader("edges.glsl");
   brainTrans = new BrainTrans();
