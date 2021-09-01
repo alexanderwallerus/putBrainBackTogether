@@ -5,46 +5,50 @@
 //and dropping and rotating them on top of another. It will then create a simple
 //3D maximum projection of all aligned slices that can be rotated and moved around.
 
-//If you intend to use this code for your project you may have to change it to
-//fit your slice thickness/magnification parameters. It is also very RAM expensive
-//and thus may not be viable for projects with interest in creating a volume view of 
-//a large area at a high resolution.
-//Setting subDiv to a number >1 will subdivide each voxel in x and y whilst keeping
-//its z (given by the slice thickness) unaffected. This will increase the 
+//If you intend to use this code for your project you may have to adjust the
+//umPerPixel and sliceThickness variables to fit your experiment.
+//Also please note that the voxel and point cloud render modes are very RAM
+//expensive and thus may not be viable for all projects.
+//Setting subDiv to a number >1 ("D"-key) will subdivide each voxel/point in x and y
+//whilst keeping the thickness in z unaffected. This will increase the 
 //visualization resolution accordingly but is also additionally memory expensive.
 
 import peasy.PeasyCam;
 PeasyCam cam;
 
+//Please adjust this block of variables for your project:
+//Set the umPerPixel to the resolution of your microscope scan
+float umPerPixel = 0.908;
+//Set the sliceThickness to the thickness of your slices in um
+float sliceThickness = 70;
+//Set zDir to +1 or -1 to build slices + or - into the z axis
+int zDir = +1;
+//Set renderMode to 0, 1, or 2 for 0: voxels, 1: point cloud, 2: PImage rendering
+int renderMode = 1;       
+//The point cloud is more efficient than voxels allowing higher detail visualization.
+//The PImage mode does provide the highest resolution, but no matter how densely
+//the PImage layers are packed, some viewing angles will be able to see between them.
+//It might be a good idea to write a custom shader for the 3D view in the future.
+
 String[] fileNames;
 PImage[] slices;
 Transformation[] trans;
 int currentSlice;
-
-float scaling;
-float umPerPixel = 0.908;
-
-boolean provideMaxImgDim = false;  //false = this will overwrite origImgMaxImgDim 
-float origImgMaxImgDim = 13014.0;  //using .png file metadata
-
-int subDiv;      //each voxel will be split into sq(subDiv) new voxels: (1, 4, 9...)
-                 //1 = 70x70x70um voxels (default), 2 = 35umx35umx70um... 
 boolean showRoi;
 boolean showOverlay;
 boolean show2D;           //this boolean is turned false for 3D projection view
 float rotIncrement = 0.01;
-
+int edgeLength;           //needed for PImage render mode scaling
+int subDiv;   //each voxel/point will be split into sq(subDiv) new ones: (1, 4, 9...)
+              //1 = 70x70x70um voxels (default), 2 = 35umx35umx70um... 
+              
 color[][][] voxCols;
 PShape voxels[];
-int zDir = +1;            //set to +1 or -1 to build slices + or - into the z axis
-
-boolean pointCloud = true;    
-//a pointcloud is more efficient than voxels allowing higher detail visualization
-
 BrainTrans brainTrans;   //transformation for the brain outline model
 PShape mouseBrain;
 PShader edges;
 boolean showOutline = true;
+boolean alignOutline = false;
 
 void setup(){
   size(1000, 1000, P3D);
@@ -52,7 +56,7 @@ void setup(){
   hint(DISABLE_DEPTH_SORT);
   hint(DISABLE_DEPTH_TEST);
   hint(DISABLE_DEPTH_MASK);
-  if(pointCloud){
+  if(renderMode == 1){
     hint(ENABLE_STROKE_PERSPECTIVE);
   }
   
@@ -76,20 +80,19 @@ void setup(){
   //uncomment the following line for quickly loading only 3 slices during debugging
   //slices = new PImage[3];
   
-  if(!provideMaxImgDim){
-    origImgMaxImgDim = findMaxImgDim(path);
-  }    
+  float origImgMaxImgDim = findMaxImgDim(path);  
+  //i.e.13014.0
   
   //original scans were done with a 5x objective, 0.908um/pixel, 70um thickness
   //and are up to 13014 pixels wide => slice thickness will be the major resolution
-  //limit. 
+  //limit for most viewing angles. 
   //Scale images down onto a width=height=1000 image, a more reasonable image
-  //size but still enough xy points to support subdividing 70um voxels in xy for a 
+  //size but still enough xy points to support subdividing 70um points in xy for a 
   //higher xy resolution if needed.
-  //origImgWidth * x = 1000 => x = 1000/origImgWidth
-  scaling = 1000.0/origImgMaxImgDim;
+  //Math: origImgWidth * x = 1000 => x = 1000/origImgWidth
+  float scaling = 1000.0/origImgMaxImgDim;
   //multiply image width and height with this factor and divide umPerPixel by it
-  umPerPixel = umPerPixel / scaling; 
+  umPerPixel = umPerPixel / scaling;
   println("um per pixel on 1000x1000 pixel images: " + umPerPixel);   //11.816711
   
   for(int i=0; i<slices.length; i++){
@@ -112,7 +115,7 @@ void setup(){
   
   voxels = new PShape[slices.length];
   //trying to put all subdivided points into a single shape can cause
-  //java.lang.ArrayIndexOutOfBoundsException: 67108864
+  //java.lang.ArrayIndexOutOfBoundsException: 67108864 => use a group for each slice
   for(int i=0; i<voxels.length; i++){
     voxels[i] = createShape(GROUP);
   }
@@ -146,45 +149,7 @@ void draw(){
           image(slices[currentSlice], 0, 0);
         }
       popMatrix();
-      if(showRoi){
-        pushStyle();
-          noFill();  strokeWeight(1);  stroke(255, 0, 0);
-          rectMode(CORNERS);
-          rect(trans[currentSlice].roi[0].x, trans[currentSlice].roi[0].y, 
-               trans[currentSlice].roi[1].x, trans[currentSlice].roi[1].y);
-        popStyle();
-      }
-      if(showOverlay){
-        fill(255);
-        textAlign(LEFT);
-        text("slice: " + trans[currentSlice].sliceName, 10, 20);
-        text("x: " + trans[currentSlice].xy.x, 10, 40);
-        text("y: " + trans[currentSlice].xy.y, 10, 60);
-        text("rotation: " + trans[currentSlice].rotation, 10, 80);
-        text("mirrored: " + trans[currentSlice].mirrored, 10, 100);
-        text("slices skipped from last: " + trans[currentSlice].slicesSkippedFromLast,
-             10, 120);
-        text("voxel subdivision modifier: " + subDiv, 10, 140);
-        textAlign(RIGHT);
-        text("Controls:", 980, 20);
-        text("Move slice: DRAG LEFT MOUSE", 980, 40);
-        text("Rotate slice: SHIFT + WHEEL", 980, 60);
-        text("Flip slice: F", 980, 80);
-        text("Change slice: WHEEL", 980, 100);
-        text("Create region of interest: DRAG RIGHT MOUSE", 980, 120);
-        text("Show region of interest (in 2D and 3D): R", 980, 140);
-        text("Load previously saved transformations: L", 980, 160);
-        text("Save current transformations: S", 980, 180);
-        text("Create 3D voxel data\n(do this before swapping to 3D view): C", 980, 
-             200);
-        text("View swap to 3D: V", 980, 240);
-        text("Change slices skipped from last: [ ]", 980, 260);
-        text("Toggle Overlay on/off: O", 980, 280);
-        text("SubDivide voxels: D", 980, 300);
-        text("Toggle Brain Outline (in 3D): O", 980, 320);
-        text("Align Outline (in 3D): RDFGZXCVBN[]", 980, 340);
-        text("Save/Load Outline alignment (in 3D): S/L", 980, 360);
-      }
+      drawOverlay();
     cam.endHUD();
   } else {
     background(0);
@@ -195,18 +160,20 @@ void draw(){
       pushMatrix();
         translate(brainTrans.xyz.x * subDiv, brainTrans.xyz.y * subDiv, 
                   brainTrans.xyz.z * subDiv);
-        rotateX(brainTrans.xyzRot.x);
+        //use YZX (!) => user can drag YZ rotations to any spherical coordinate and
+        //then roll the outline around its relative x to achieve any 3D rotation
         rotateY(brainTrans.xyzRot.y);
         rotateZ(brainTrans.xyzRot.z);
+        rotateX(brainTrans.xyzRot.x);
         scale(brainTrans.scale * subDiv);
         
         shape(mouseBrain);
       popMatrix();
       filter(edges);   //everything drawn so far will be rendered with the filter
-      if(keyPressed){
-        moveBrain();
-      }
       noLights();      //afterwards show voxels/point cloud with pure colors
+      if(keyPressed){
+        moveBrainOutline();
+      }
     }
     try{
       for(PShape s : voxels){
@@ -216,28 +183,62 @@ void draw(){
       println(e);
       exit();
     }
+    if(renderMode == 2){
+      float skippedSlicesOffset = 0;
+      for(int i=0; i<slices.length; i++){
+        skippedSlicesOffset += trans[i].slicesSkippedFromLast;
+        float currentZ = (-zDir*(i+skippedSlicesOffset) *subDiv + 
+                           zDir*slices.length/2 *subDiv) *10;
+        float nextZ;
+        if(i+1 < trans.length){
+          nextZ = (-zDir*(i+1+skippedSlicesOffset+trans[i+1].slicesSkippedFromLast) 
+                    *subDiv + 
+                    zDir*slices.length/2 *subDiv) *10;
+        } else {
+          nextZ = (-zDir*(i+1+skippedSlicesOffset) *subDiv + 
+                    zDir*slices.length/2 *subDiv) *10;
+        }
+        for(float f=0; f<1; f+=0.03){
+          float imgZ = lerp(currentZ, nextZ, f);
+          pushMatrix();
+            translate(0, 0, imgZ);
+            image(slices[i], 0, 0, edgeLength*10, edgeLength*10);
+          popMatrix();
+        }
+      }
+    }
+    cam.beginHUD();
+      if(alignOutline){
+        textSize(20);
+        textAlign(CENTER);
+        fill(255, 0, 0);
+        text("Outline Aligning Mode", width/2, 30);
+      }
+    cam.endHUD();
   }
 }
 
 void createVolume(){
   //println(umPerPixel);                        //11.816711
-  //since our depth is 70um we would like a 70x70x70um voxel as default voxel.
-  //=> we want 1 pixel to be 70um 
-  //11.816711u/pix * scaling = 70u/pix => x = 70/11.816711 = 5.923814
-  float targetScaling = 70 / umPerPixel;
-  println("rescaling pixels into voxels by factor: " + targetScaling);    //5.923814
+  //If our depth is i.e. 70um we would like a 70x70x70um voxel/point as default.
+  //=> we want 1 pixel to be 70um (or i.e. 30 um if we have 30um slices)
+  //Math: 11.816711u/pix * scaling = 70u/pix => scaling = 70/11.816711 = 5.923814
+  float targetScaling = sliceThickness / umPerPixel;
   //if the um/pix doubles, the image width halves. =>
-  //divide the image width (=height=1000) through this same value
+  //divide the image width (=image height=1000) through this same value
+  println("rescaling pixels into points by factor: " + 1/targetScaling);   //0.168810
   int newImgWidth = int(round(1000 / targetScaling));
   //168.8101571 rounded to 169 => a 169x169 pix image
   //This rounding (from 168.8101571 to 169) creates a very small inaccuracy in the xy
-  //extent of voxels that could be reduced with larger voxels in a future version
-  println("volume width(=height) without subdivisions: " + newImgWidth + " voxels");
+  //extent of all points that could be eliminated through point placement and size in
+  //the future.
+  println("volume slice resolution without subdivisions: " + newImgWidth + "*" + 
+          newImgWidth + " points/voxels");
   if(subDiv != 1){
-    println("subdivididing each voxel into: " + int(sq(subDiv)) + " voxels in x/y");
+    println("subdivididing each point into: " + int(sq(subDiv)) + " points in x/y");
     newImgWidth *= subDiv;            //i.e. 2x the newImgwidth => 4x the voxels
-    println("the maximum volume dimension is " + newImgWidth + " voxels long.");
-    println("please note that a maxium dimension of over 1000 voxels is not " +
+    println("the maximum volume dimension is " + newImgWidth + " points long.");
+    println("please note that a maxium dimension of over 1000 points is not " +
             "reccomended");
   }
   voxCols = new color[newImgWidth][newImgWidth][slices.length];
@@ -267,6 +268,16 @@ void createVolume(){
       }
     current.endDraw();
     
+    if(renderMode == 2){
+      subDiv = 1;    
+      //subDivs don't make sense in this mode, but would affect the outline scale
+      edgeLength = voxCols.length;
+      //take the aligned images
+      slices[i] = current.copy();
+       //don't fill in the shape
+      continue; 
+    }
+    
     //resize the drawn image to the correct size => PGraphics needs to become an image
     PImage cur = current.copy();
     cur.resize(newImgWidth, newImgWidth);
@@ -291,7 +302,7 @@ void createVolume(){
     println("Free memory: " + Runtime.getRuntime().freeMemory());
     
     skippedSlicesOffset += trans[i].slicesSkippedFromLast;
-    if(!pointCloud){
+    if(renderMode == 0){
       for(int y = 0; y<voxCols[0].length; y++){    //image height
         for(int x = 0; x<voxCols.length; x++){     //image width
           noStroke();
@@ -321,7 +332,7 @@ void createVolume(){
           }
         }
       }
-      println("created slice " + i + " voxel data");
+      println("created slice " + i + " point data");
       points.endShape();
       voxels[i].addChild(points);
     }
@@ -329,158 +340,6 @@ void createVolume(){
   voxCols = null;
   System.gc();
   println("Free memory: " + Runtime.getRuntime().freeMemory());
-}
-
-void keyPressed(){
-  if(key == 'l'){
-    println("Loading transformations");
-    loadTransformations();
-  }
-  if(key == 's'){
-    println("Saving transformations");
-    saveTransformations();
-  }
-  if(show2D){
-    if(key == 'f'){
-      println("Flipping the image on the y axis");
-      flipSlice(currentSlice);
-      trans[currentSlice].mirrored = !trans[currentSlice].mirrored;
-    }
-    if(key == 'c'){
-      println("Creating 3D shape from images and transformations");
-      createVolume();
-      println("Done creating 3D shape");
-    }
-    if(key == 'v'){
-      println("View swap to 3D\nplease wait a couple of seconds");
-      //a lot of scrolling may have happened in 2D view => reset the camera
-      cam.reset();
-      show2D = false;
-    }
-    if(key == 'r'){
-      showRoi = !showRoi;
-    }
-    if(key == '['){
-      trans[currentSlice].slicesSkippedFromLast--;
-      trans[currentSlice].slicesSkippedFromLast = 
-                          max(trans[currentSlice].slicesSkippedFromLast, 0);
-    }
-    if(key == ']'){
-      trans[currentSlice].slicesSkippedFromLast++;
-    }
-    if(key == 'o'){
-      showOverlay = !showOverlay;
-    }
-    if(key == 'd'){
-      subDiv += 1;
-      if(subDiv == 6){
-        subDiv = 1;
-      }
-    }
-  } else {
-    if(key == 'o'){
-      showOutline = !showOutline;
-    }
-   //if(key == 'v'){
-   //   println("View swap to 2D");
-   //   show2D = true;
-   // }
-  }
-}
-
-void mouseWheel(MouseEvent event){
-  float e = event.getCount();              //up = -1, down = 1
-  //println(keyCode);
-  if(show2D){
-    if(!(keyPressed && keyCode == 16)){    //SHIFT key not pressed
-      if(e == -1){
-        currentSlice++;
-      } else if (e == 1){
-        currentSlice--;
-      }
-      currentSlice = constrain(currentSlice, 0, trans.length-1);
-      println("switched to current slice: ", currentSlice);
-    } else {
-      trans[currentSlice].rotation += e*rotIncrement;
-    }
-  }
-}
-
-void mouseDragged(){
-  if(show2D){
-    if(mouseButton == 37){
-      trans[currentSlice].xy.x += mouseX - pmouseX;
-      trans[currentSlice].xy.y += mouseY - pmouseY; 
-    } else if (mouseButton == 39){
-      for(Transformation t : trans){  //update what is currently being drawn
-        t.roi[1].x = mouseX;
-        t.roi[1].y = mouseY;
-      }
-    }
-  }
-}
-
-
-void mousePressed(){
-  if(show2D && mouseButton == 39){   //39 = right mouse button
-    for(Transformation t : trans){
-      t.roi[0].x = mouseX;
-      t.roi[0].y = mouseY;
-    }
-  }
-}
-
-void mouseReleased(){
-  if(show2D && mouseButton == 39){
-    for(Transformation t : trans){
-      t.roi[1].x = mouseX;
-      t.roi[1].y = mouseY;
-    }
-  }
-}
-
-float findMaxImgDim(String path){
-  //We want to resize the image down to 1000 width or height 
-  //(whichever is larger) => need to find the maximum width or height of any image.
-  int maxDim = 0;
-  //loading 30 large images just for finding the largest image dimension would be 
-  //taking uneccessary time => just read the bytes and take the width and height
-  //from the .png header
-  
-  byte b[] = new byte[]{};
-  for(int i=0; i<slices.length; i++){
-    String fileName = path + "/slices/" + fileNames[i];
-    b = loadBytes(fileName);
-    byte[] w = subset(b, 16, 4);    //width are 4 bytes [16 to 19], i.e. 0 0 50 -46
-    //printArray(b);                //8 bit bytes are values  between -128 and 127 
-    //for(int j=0; j<4; j++){
-    //  println(int(b[j]));
-    //}
-    int madeInt = 0;                //50, -46 will become the ints 50, 210
-    madeInt += int(w[1]) * 256 * 256;   
-    madeInt += int(w[2]) * 256;   
-    madeInt += int(w[3]);           //(50x256)+210 = 13010
-    maxDim = max(maxDim, madeInt);
-    byte[] h = subset(b, 20, 4);   //height bytes are [20 to 23]
-    madeInt = 0;
-    madeInt += int(h[1]) * 256 * 256;   
-    madeInt += int(h[2]) * 256;   
-    madeInt += int(h[3]);      
-    maxDim = max(maxDim, madeInt);  
-    println("maximum image width or height by slice: " + i + ": " + maxDim);
-  }
-  return float(maxDim);
-}
-
-void flipSlice(int i){
-  PGraphics temp = createGraphics(slices[i].width, slices[i].height);
-  temp.beginDraw();
-    temp.translate(temp.width/2, temp.height/2);
-    temp.scale(-1.0, 1.0);
-    temp.imageMode(CENTER);
-    temp.image(slices[i], 0, 0);
-    slices[i] = temp;
-  temp.endDraw();
 }
 
 class Transformation{
@@ -501,82 +360,6 @@ class Transformation{
   }
 }
 
-void loadTransformations(){
-  Table table = loadTable("transformations.csv");
-  //keep a reference to the old transformation array for if something was mirrored
-  Transformation[] oldTrans = new Transformation[trans.length];
-  arrayCopy(trans, oldTrans);
-  trans = new Transformation[trans.length];
-  for(int i=0; i<trans.length; i++){
-    trans[i] = new Transformation();
-  }
-  for(int line=1; line<table.getRowCount(); line++){
-    int i = line-1;
-    try{
-      trans[i].sliceName = table.getString(line, 0);
-      trans[i].xy.x = table.getFloat(line, 1);
-      trans[i].xy.y = table.getFloat(line, 2);
-      trans[i].rotation = table.getFloat(line, 3);
-      if(table.getInt(line, 4) == 1 && !oldTrans[i].mirrored){
-        //this slice should be mirrored, but isn't yet
-        flipSlice(i);
-        trans[i].mirrored = true;
-      } else if (table.getInt(line, 4) == 0 && oldTrans[i].mirrored){
-        //this slice should not be mirrored, but is
-        flipSlice(i);
-        trans[i].mirrored = false;
-      }
-      trans[i].mirrored = table.getInt(line, 4) == 1;
-      trans[i].roi[0].x = table.getInt(line, 5);
-      trans[i].roi[0].y = table.getInt(line, 6);
-      trans[i].roi[1].x = table.getInt(line, 7);
-      trans[i].roi[1].y = table.getInt(line, 8);
-      trans[i].slicesSkippedFromLast = table.getInt(line, 9);
-      println("loaded slice " + i + " transformations"); 
-    } catch(ArrayIndexOutOfBoundsException e){
-      println("there are more slices in the .csv file than were loaded by the " +
-      "program\nskipping transformations for slice " + i);
-    }
-  }
-  brainTrans.xyz.x = table.getFloat(0, 0);
-  brainTrans.xyz.y = table.getFloat(0, 1);
-  brainTrans.xyz.z = table.getFloat(0, 2);
-  brainTrans.xyzRot.x = table.getFloat(0, 3);
-  brainTrans.xyzRot.y = table.getFloat(0, 4);
-  brainTrans.xyzRot.z = table.getFloat(0, 5);
-  brainTrans.scale = table.getFloat(0, 6);
-}
-
-void saveTransformations(){
-  Table table = new Table();
-  for(int i=0; i<10; i++){
-    table.addColumn();
-  }
-  table.addRow();
-  table.setFloat(0, 0, brainTrans.xyz.x);
-  table.setFloat(0, 1, brainTrans.xyz.y);
-  table.setFloat(0, 2, brainTrans.xyz.z);
-  table.setFloat(0, 3, brainTrans.xyzRot.x);
-  table.setFloat(0, 4, brainTrans.xyzRot.y);
-  table.setFloat(0, 5, brainTrans.xyzRot.z);
-  table.setFloat(0, 6, brainTrans.scale);
-  for(int i=0; i<trans.length; i++){
-    int line = i+1;
-    table.addRow();
-    table.setString(line, 0, trans[i].sliceName);
-    table.setFloat(line, 1, trans[i].xy.x);
-    table.setFloat(line, 2, trans[i].xy.y);
-    table.setFloat(line, 3, trans[i].rotation);
-    table.setInt(line, 4, trans[i].mirrored ? 1 : 0);
-    table.setInt(line, 5, int(trans[i].roi[0].x));
-    table.setInt(line, 6, int(trans[i].roi[0].y));
-    table.setInt(line, 7, int(trans[i].roi[1].x));
-    table.setInt(line, 8, int(trans[i].roi[1].y));
-    table.setInt(line, 9, trans[i].slicesSkippedFromLast);
-  }
-  saveTable(table, "data/transformations.csv");
-}
-
 class BrainTrans{
   PVector xyz, xyzRot;
   float scale;
@@ -588,22 +371,51 @@ class BrainTrans{
   }
 }
 
-void moveBrain(){
-  //may want to use booleans to allow multiple keys at the same time if necessary
-  if(key == 'd'){brainTrans.xyz.x -= 0.5;}
-  if(key == 'g'){brainTrans.xyz.x += 0.5;}
-  if(key == 'e'){brainTrans.xyz.y -= 0.5;}
-  if(key == 't'){brainTrans.xyz.y += 0.5;}
-  if(key == 'r'){brainTrans.xyz.z += 0.5;}
-  if(key == 'f'){brainTrans.xyz.z -= 0.5;}
-  
-  if(key == 'z'){brainTrans.xyzRot.x -= 0.002;}
-  if(key == 'x'){brainTrans.xyzRot.x += 0.002;}
-  if(key == 'c'){brainTrans.xyzRot.y -= 0.002;}
-  if(key == 'v'){brainTrans.xyzRot.y += 0.002;}
-  if(key == 'b'){brainTrans.xyzRot.z -= 0.002;}
-  if(key == 'n'){brainTrans.xyzRot.z += 0.002;}
-  
-  if(key == ']'){brainTrans.scale *= 1.001;}
-  if(key == '['){brainTrans.scale *= 0.999;}
-}
+void drawOverlay(){
+if(showRoi){
+  pushStyle();
+    noFill();  strokeWeight(1);  stroke(255, 0, 0);
+    rectMode(CORNERS);
+    rect(trans[currentSlice].roi[0].x, trans[currentSlice].roi[0].y, 
+         trans[currentSlice].roi[1].x, trans[currentSlice].roi[1].y);
+  popStyle();
+  }
+  if(showOverlay){
+    String[] leftLines = {
+      "slice: " + trans[currentSlice].sliceName,
+      "x: " + trans[currentSlice].xy.x,
+      "y: " + trans[currentSlice].xy.y,
+      "rotation: " + trans[currentSlice].rotation,
+      "mirrored: " + trans[currentSlice].mirrored,
+      "slices skipped from last: " + trans[currentSlice].slicesSkippedFromLast,
+      "point subdivision modifier: " + subDiv};
+    String[] rightLines = {
+      "Controls:",
+      "Move slice: DRAG LEFT MOUSE",
+      "Rotate slice: SHIFT + WHEEL",
+      "Flip slice: F",
+      "Change slice: WHEEL",
+      "Create region of interest: DRAG RIGHT MOUSE",
+      "Toggle region of interest visible and active: R",
+      "Load previously saved transformations: L",
+      "Save current transformations: S",
+      "Create 3D shape data and view swap to 3D: C",
+      "Change slices skipped from last: [ ]",
+      "Toggle Overlay on/off: O",
+      "SubDivide voxels/points: D",
+      "Toggle Brain Outline (in 3D): O",
+      "Move Outline X/Y/Z (in 3D): DG/ET/RF",
+      "Toggle Outline Rotation mode (in 3D): A",
+      "Rotate/Roll/Scale outline (in 3D after \"A\"):",
+      "DRAG LEFT/RIGHT MOUSE/WHEEL",
+      "Save/Load Outline alignment (in 3D): S/L"};
+    for(int i=0; i<leftLines.length; i++){
+      textAlign(LEFT);
+      text(leftLines[i], 10, 20 + (i*20));
+    }
+    for(int i=0; i<rightLines.length; i++){
+      textAlign(RIGHT);
+      text(rightLines[i], 980, 20 + (i*20));
+    }
+  }
+}     

@@ -5,3 +5,6 @@ slices/*
 #can't keep an empty folder - it needs to have at least one file =>
 #exception to the above rule:
 !slices/.gitkeep 
+
+transformations/transformations.csv
+transformations/transformationsBackup.csv
