@@ -2,6 +2,9 @@
 
 ## Align 2D scan (=image) files and create a 3D maximum projection model easily
 
+![created example models](/readmeFiles/examples.png)
+Example results: 2 different experiments showing labeled neuron populations and their innervation throughout the mouse brain.
+
 Simply place a series of RGB image files in the "slices" folder (i.e. S0.png, S1.png, S2.png, S3.png...) and run the program.
 The images can be taken from tissue slices with a fluorescence microscope tilescan, or from any other data that consists of 2D images taken throughout a 3D object.
 In the program you can simply drag and drop and rotate and invert the 2D slices on top of another to quickly align them.
