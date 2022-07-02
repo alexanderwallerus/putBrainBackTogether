@@ -22,7 +22,7 @@ float umPerPixel = 0.908;
 //Set the sliceThickness to the thickness of your slices in um
 float sliceThickness = 70;
 //Set zDir to +1 or -1 to build slices + or - into the z axis
-int zDir = +1;
+int zDir = 1;
 //Set renderMode to 0, 1, or 2 for 0: voxels, 1: point cloud, 2: PImage rendering
 int renderMode = 1;       
 //The point cloud is more efficient than voxels allowing higher detail visualization.
